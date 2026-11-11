@@ -1,0 +1,13 @@
+# Secrets and runtime state: never commit
+data/
+*.db
+*.db-shm
+*.db-wal
+*.lock
+.env
+.env.*
+
+# Environment and caches
+.venv/
+__pycache__/
+*.pyc

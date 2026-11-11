@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Strikeline Live Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: trading desk — chart + order ticket side by side, open book and settlement log beneath; stacks to one column on phones */
+:root{
+  --bg:#E8ECF0; --panel:#FBFCFD; --sunk:#F1F4F7; --line:#D2D9E0; --fg:#14202B; --muted:#5A6875;
+  --accent:#2C58CC; --accent-soft:#E1E7F8; --on-accent:#FFFFFF;
+  --up:#13835A; --up-soft:#DCF0E6; --down:#C63A31; --down-soft:#F7E0DD; --warn:#9A6A00; --warn-soft:#F6ECD3;
+  --f-display:"Familjen Grotesk","Helvetica Neue",Arial,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+  --r:10px; color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0D131A; --panel:#141C25; --sunk:#10171F; --line:#25313D; --fg:#E1E7ED; --muted:#8997A5;
+  --accent:#7D9CFF; --accent-soft:#1D2944; --on-accent:#0D131A;
+  --up:#3CC48B; --up-soft:#14342A; --down:#FF6D60; --down-soft:#3B1D1B; --warn:#E3B341; --warn-soft:#352B12; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0D131A; --panel:#141C25; --sunk:#10171F; --line:#25313D; --fg:#E1E7ED; --muted:#8997A5;
+  --accent:#7D9CFF; --accent-soft:#1D2944; --on-accent:#0D131A;
+  --up:#3CC48B; --up-soft:#14342A; --down:#FF6D60; --down-soft:#3B1D1B; --warn:#E3B341; --warn-soft:#352B12; color-scheme:dark}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px;line-height:1.45}
+[hidden]{display:none!important}
+.wrap{max-width:1240px;margin:0 auto;padding-inline:16px;padding-block:18px 40px;display:grid;gap:16px}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500}
+
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:14px 28px;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.brand h1{font-family:var(--f-display);font-weight:700;font-size:26px;letter-spacing:-.02em;margin:0;line-height:1}
+.brand svg{flex:none}
+.feed{display:inline-flex;align-items:center;gap:7px;font-size:12px;border-radius:99px;padding:3px 10px;background:var(--sunk);border:1px solid var(--line);white-space:nowrap}
+.feed i{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.feed.live i{background:var(--up);box-shadow:0 0 0 3px var(--up-soft)}
+.feed.bad{background:var(--warn-soft);border-color:var(--warn);color:var(--warn)} .feed.bad i{background:var(--warn)}
+.stats{display:flex;flex-wrap:wrap;gap:6px 26px}
+.stat{display:grid;gap:1px}
+.stat b{font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-weight:500;font-size:17px}
+.stat.big b{font-family:var(--f-display);font-weight:600;font-size:24px;letter-spacing:-.01em}
+.pos{color:var(--up)} .neg{color:var(--down)}
+
+.desk{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:stretch}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r)}
+.chartcard{min-width:0;overflow:hidden;display:flex;flex-direction:column}
+.tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid var(--line)}
+.tab{background:none;border:0;border-right:1px solid var(--line);padding:12px 16px;text-align:left;display:grid;gap:2px;position:relative;min-width:0}
+.tab:last-child{border-right:0}
+.tab .sym{font-family:var(--f-display);font-weight:600;font-size:15px;display:flex;gap:8px;align-items:baseline}
+.tab .sym small{font-family:var(--f-body);font-weight:400;font-size:12px;color:var(--muted)}
+.tab .px{font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:16px;overflow:hidden;text-overflow:ellipsis}
+.tab .chg{font-family:var(--f-mono);font-size:12px}
+.tab .stale{color:var(--warn)}
+.tab[aria-pressed="true"]{background:var(--sunk)}
+.tab[aria-pressed="true"]::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent)}
+.tab:hover{background:var(--sunk)}
+/* side by side, the chart grows to the ticket's height; the canvas is absolutely placed so it never sizes the box itself */
+.chartbox{position:relative;flex:1 1 auto;min-height:300px}
+canvas{position:absolute;inset:0;display:block;width:100%;height:100%}
+.loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:13px}
+.chartfoot{display:flex;flex-wrap:wrap;gap:6px 18px;padding:10px 16px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.key{display:inline-flex;align-items:center;gap:6px}
+.key i{display:inline-block;width:16px;border-top:2px dashed currentColor}
+
+.ticket{padding:16px;display:grid;gap:14px}
+.ticket h2{font-family:var(--f-display);font-weight:600;font-size:18px;margin:0;display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.ticket h2 span{font-family:var(--f-mono);font-size:12px;font-weight:400;color:var(--muted)}
+.field{display:grid;gap:6px}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--sunk)}
+.seg button{border:0;background:none;padding:8px 4px;font-size:13px;font-family:var(--f-mono);border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button:disabled{opacity:.4;cursor:not-allowed}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--accent);font-weight:500;box-shadow:inset 0 -2px 0 var(--accent)}
+.dirs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dir{border:1.5px solid var(--line);background:var(--panel);border-radius:8px;padding:10px;display:grid;text-align:left}
+.dir strong{font-family:var(--f-display);font-size:17px;font-weight:600}
+.dir span{font-size:12px;color:var(--muted)}
+.dir.h[aria-pressed="true"]{border-color:var(--up);background:var(--up-soft)}
+.dir.h[aria-pressed="true"] strong{color:var(--up)}
+.dir.l[aria-pressed="true"]{border-color:var(--down);background:var(--down-soft)}
+.dir.l[aria-pressed="true"] strong{color:var(--down)}
+.stakerow{display:flex;gap:6px;flex-wrap:wrap}
+.stakerow input{flex:1 1 110px;min-width:0;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel);color:var(--fg);font-family:var(--f-mono);font-size:15px}
+.chip{border:1px solid var(--line);background:var(--sunk);border-radius:99px;padding:5px 10px;font-family:var(--f-mono);font-size:12px}
+.chip:hover{border-color:var(--accent)}
+.quote{background:var(--sunk);border-radius:8px;padding:10px 12px;display:grid;gap:5px;font-size:13px;margin:0}
+.quote div{display:flex;justify-content:space-between;gap:10px}
+.quote dt{color:var(--muted)} .quote dd{margin:0;font-family:var(--f-mono);font-variant-numeric:tabular-nums;text-align:right}
+.quote .pay dd{font-size:15px;font-weight:500}
+.buy{border:0;border-radius:8px;padding:12px;font-family:var(--f-display);font-weight:600;font-size:16px;color:var(--on-accent);background:var(--up)}
+.buy.l{background:var(--down)}
+.buy:disabled{opacity:.45;cursor:not-allowed}
+
+.books{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px;align-items:start}
+.book{min-width:0}
+.bookhead{display:flex;justify-content:space-between;align-items:baseline;padding:12px 16px;border-bottom:1px solid var(--line);gap:8px}
+.bookhead h3{margin:0;font-family:var(--f-display);font-weight:600;font-size:16px}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500;text-align:right;padding:8px 8px;white-space:nowrap}
+td{padding:9px 8px;text-align:right;border-top:1px solid var(--line);white-space:nowrap;font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+th:first-child,td:first-child{text-align:left;padding-left:16px}
+th:last-child,td:last-child{padding-right:16px}
+.pill{display:inline-block;font-family:var(--f-body);font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:99px}
+.pill.h,.pill.win{background:var(--up-soft);color:var(--up)} .pill.l,.pill.loss{background:var(--down-soft);color:var(--down)}
+.pill.closed{background:var(--accent-soft);color:var(--accent)} .pill.void{background:var(--warn-soft);color:var(--warn)}
+.timer{display:grid;gap:3px;justify-items:end}
+/* two-line cells keep the tables narrow enough to fit their column without scrolling */
+.stack{display:grid;gap:3px;justify-items:end}
+.stack.start{justify-items:start}
+.sub{font-size:11.5px;color:var(--muted);font-family:var(--f-mono)}
+.sub.pos{color:var(--up)} .sub.neg{color:var(--down)}
+.bar{width:64px;height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent)}
+.itm{color:var(--up)} .otm{color:var(--down)}
+.close{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:4px 9px;font-size:12px;font-family:var(--f-body)}
+.close:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.close:disabled{opacity:.4;cursor:not-allowed}
+.muted{color:var(--muted)}
+.pager{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+.pager button{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:4px 10px;font-size:12px}
+.pager button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.pager button:disabled{opacity:.4;cursor:not-allowed}
+.empty{padding:22px 16px;color:var(--muted);font-size:13px}
+.foot{display:flex;flex-wrap:wrap;gap:10px 20px;justify-content:space-between;align-items:center;color:var(--muted);font-size:12px}
+.foot p{margin:0}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:99px;font-size:13px;box-shadow:0 6px 24px rgba(0,0,0,.18);transition:opacity .25s,transform .25s;max-width:calc(100% - 32px)}
+.toast.off{opacity:0;transform:translate(-50%,8px);pointer-events:none}
+
+@media (max-width:1180px){.books{grid-template-columns:minmax(0,1fr)}}   /* below this the widest open-contracts row (~597px) can't fit beside the log */
+@media (max-width:920px){.desk{grid-template-columns:minmax(0,1fr)} .chartbox{flex:none;height:360px}}
+@media (max-width:680px){
+/* narrow screens: each contract becomes a card instead of a sideways-scrolling row.
+   680px leaves margin over the ~631px the widest open-contracts row needs as a table. */
+  .cards thead{display:none}
+  .cards,.cards tbody{display:block}
+  .cards tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 12px;padding:12px 16px;border-top:1px solid var(--line)}
+  .cards tr:first-child{border-top:0}
+  .cards td,.cards td:first-child,.cards td:last-child{display:grid;align-content:start;gap:3px;padding:0;border:0;text-align:left;white-space:nowrap;min-width:0}
+  .cards td[data-label]::before{content:attr(data-label);font-family:var(--f-body);font-size:10.5px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .cards .stack,.cards .timer{justify-items:start}
+  .cards td:first-child{grid-column:1 / 3}
+  #openTable td:nth-child(6){grid-column:2 / 4}
+  #openTable td:nth-child(7),#histTable td:nth-child(4),#fundTable td:nth-child(5){grid-column:3;grid-row:1;justify-self:end}
+}
+@media (max-width:520px){
+  .chartbox{height:270px;min-height:0}
+  .tab{padding:10px}
+  .tab .sym small{display:none}
+  .tab .px{font-size:14px}
+  .stat.big b{font-size:21px}
+}
+/* testnet USDC */
+.funds{min-width:0}
+.fundgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0;border-bottom:1px solid var(--line)}
+.fundcol{padding:14px 16px;display:grid;gap:10px;align-content:start;border-right:1px solid var(--line);min-width:0}
+.fundcol:last-child{border-right:0}
+.fundcol h4{margin:0;font-family:var(--f-display);font-weight:600;font-size:15px}
+.fundcol p{margin:0;font-size:13px;color:var(--muted)}
+.fundcol p b{color:var(--fg);font-family:var(--f-mono);font-weight:500}
+.addr{display:flex;gap:6px;align-items:center;min-width:0}
+.addr code{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;font-family:var(--f-mono);font-size:12px;background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 12px;font-size:13px;justify-self:start}
+.btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.btn.primary:hover:not(:disabled){color:var(--on-accent);filter:brightness(1.08)}
+#wdTo,#wdAmt{width:100%;min-width:0;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel);color:var(--fg);font-family:var(--f-mono);font-size:12.5px}
+.fundwarn{color:var(--warn)!important}
+a.tx{color:var(--accent);font-family:var(--f-mono);font-size:12.5px}
+.pill.queued,.pill.signed,.pill.broadcast{background:var(--accent-soft);color:var(--accent)}
+.pill.sent,.pill.credited{background:var(--up-soft);color:var(--up)}
+.pill.failed,.pill.cancelled{background:var(--down-soft);color:var(--down)}
+.pill.review{background:var(--warn-soft);color:var(--warn)}
+@media (max-width:760px){.fundgrid{grid-template-columns:minmax(0,1fr)} .fundcol{border-right:0;border-bottom:1px solid var(--line)} .fundcol:last-child{border-bottom:0}}
+
+/* sign-in */
+.authwrap{display:grid;justify-items:center;padding-inline:16px;padding-block:12vh 40px}
+.authcard{width:min(400px,100%);padding:24px;display:grid;gap:18px}
+.authlead{margin:0;color:var(--muted);font-size:13.5px;max-width:52ch}
+#authForm{display:grid;gap:14px}
+#authForm input{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--panel);color:var(--fg);font:inherit;font-size:15px}
+.authnote{margin:0;font-size:12px;color:var(--muted)}
+.autherr{margin:0;font-size:13px;color:var(--down)}
+.authgo{border:0;border-radius:8px;padding:12px;font-family:var(--f-display);font-weight:600;font-size:16px;color:var(--on-accent);background:var(--accent)}
+.authgo:disabled{opacity:.5;cursor:wait}
+.who{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);white-space:nowrap}
+.who b{color:var(--fg);font-weight:600}
+.who button{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:3px 10px;font-size:12px}
+.who button:hover{border-color:var(--accent);color:var(--accent)}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+</style>
+</head>
+<body>
+<main class="authwrap" id="auth" hidden>
+  <div class="panel authcard">
+    <div class="brand"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="1" y="1" width="32" height="32" rx="8" fill="var(--fg)"/><path d="M6 22 L11 17 L15 20 L21 11 L28 15" fill="none" stroke="var(--bg)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/><path d="M5 14 H29" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="2.5 2.5"/></svg><h1>Strikeline</h1></div>
+    <p class="authlead">Paper-trade binary contracts on live BTC, ETH and XRP prices. Fund your account with test USDC on Base Sepolia; nothing here uses real money.</p>
+    <div class="seg" id="authTabs"><button type="button" data-mode="login" aria-pressed="true">Log in</button><button type="button" data-mode="signup" aria-pressed="false">Sign up</button></div>
+    <form id="authForm" novalidate>
+      <label class="field"><span class="label">Username</span><input id="authUser" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" required></label>
+      <label class="field"><span class="label">Password</span><input id="authPass" name="password" type="password" autocomplete="current-password" maxlength="200" required></label>
+      <p class="authnote" id="authNote" hidden>Usernames are 3 to 32 characters: letters, numbers, dots, dashes and underscores. Passwords need at least 8 characters.</p>
+      <p class="autherr" id="authErr" role="alert" hidden></p>
+      <button class="authgo" id="authGo" type="submit">Log in</button>
+    </form>
+  </div>
+</main>
+<div class="wrap" id="app" hidden>
+  <header class="top">
+    <div class="brand">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="1" y="1" width="32" height="32" rx="8" fill="var(--fg)"/><path d="M6 22 L11 17 L15 20 L21 11 L28 15" fill="none" stroke="var(--bg)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/><path d="M5 14 H29" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="2.5 2.5"/></svg>
+      <h1>Strikeline</h1>
+      <span class="feed" id="feed"><i></i><span id="feedTxt">Connecting…</span></span>
+      <span class="who"><b id="who"></b><button type="button" id="logout">Log out</button></span>
+    </div>
+    <div class="stats">
+      <div class="stat big"><span class="label">Equity</span><b id="sEq">—</b></div>
+      <div class="stat"><span class="label">Cash</span><b id="sBal">—</b></div>
+      <div class="stat"><span class="label">Realized P&amp;L</span><b id="sPnl">—</b></div>
+      <div class="stat"><span class="label">Hit rate</span><b id="sHit">—</b></div>
+      <div class="stat"><span class="label">Edge paid</span><b id="sEdge">—</b></div>
+    </div>
+  </header>
+
+  <div class="desk">
+    <section class="panel chartcard" aria-label="Price chart">
+      <div class="tabs" id="tabs"></div>
+      <div class="chartbox"><canvas id="cv" aria-label="Live mid-price chart for the selected coin"></canvas><div class="loading" id="loading">Loading recent prices…</div></div>
+      <div class="chartfoot">
+        <span class="key" style="color:var(--up)"><i></i>Higher strike</span>
+        <span class="key" style="color:var(--down)"><i></i>Lower strike</span>
+        <span class="key" style="color:var(--muted)"><i style="border-top-style:dotted"></i>Ticket strike preview</span>
+        <span>Line is the Coinbase bid/ask mid. ● marks each expiry. Shaded area is the next 5 min.</span>
+      </div>
+    </section>
+
+    <aside class="panel ticket" aria-label="Order ticket">
+      <h2>Order ticket <span id="tkSym">—</span></h2>
+      <div class="dirs">
+        <button class="dir h" id="dirH" aria-pressed="true"><strong>▲ Higher</strong><span>Above strike at expiry</span></button>
+        <button class="dir l" id="dirL" aria-pressed="false"><strong>▼ Lower</strong><span>Below strike at expiry</span></button>
+      </div>
+      <div class="field"><span class="label">Strike · <span id="kVal" style="font-family:var(--f-mono)">—</span></span><div class="seg" id="segK"></div></div>
+      <div class="field"><span class="label">Expiry</span><div class="seg" id="segE"></div></div>
+      <div class="field">
+        <label class="label" for="stake">Stake (test USDC)</label>
+        <div class="stakerow">
+          <input id="stake" type="number" inputmode="decimal" min="0.01" step="0.01" value="5">
+          <button class="chip" data-stake="1">1</button><button class="chip" data-stake="5">5</button><button class="chip" data-stake="10">10</button><button class="chip" data-stake="25">25</button>
+        </div>
+      </div>
+      <dl class="quote">
+        <div><dt>Model probability</dt><dd id="qProb">—</dd></div>
+        <div><dt>Price per 1-USDC contract</dt><dd id="qAsk">—</dd></div>
+        <div><dt>Contracts</dt><dd id="qN">—</dd></div>
+        <div class="pay"><dt>Pays if right</dt><dd id="qPay">—</dd></div>
+        <div><dt>Desk edge in this price</dt><dd id="qEdge">—</dd></div>
+      </dl>
+      <button class="buy" id="buy" disabled>Buy</button>
+    </aside>
+  </div>
+
+  <div class="books">
+    <section class="panel book" aria-label="Open contracts">
+      <div class="bookhead"><h3>Open contracts</h3><span class="label" id="openSum"></span></div>
+      <div class="scroll"><table class="cards" id="openTable"><thead><tr><th>Contract</th><th>Strike</th><th>Mid</th><th>Left</th><th>Cost</th><th>Bid value</th><th></th></tr></thead><tbody id="openBody"></tbody></table></div>
+      <div class="empty" id="openEmpty">No open contracts. Pick a coin, a direction, a strike and an expiry on the ticket, then buy. Positions appear here with a live bid you can sell into before expiry.</div>
+    </section>
+    <section class="panel book" aria-label="Settlement log">
+      <div class="bookhead"><h3>Settlement log</h3><span class="label" id="histSum"></span></div>
+      <div class="scroll"><table class="cards" id="histTable"><thead><tr><th>Contract</th><th>Strike</th><th>Final</th><th>Result</th><th>P&amp;L</th></tr></thead><tbody id="histBody"></tbody></table></div>
+      <div class="pager" id="histPager" hidden><button type="button" id="histNewer">‹ Newer</button><span id="histRange" class="num"></span><button type="button" id="histOlder">Older ›</button></div>
+      <div class="empty" id="histEmpty">Settled, sold and voided contracts are logged here with their final mid and P&amp;L.</div>
+    </section>
+  </div>
+
+  <section class="panel funds" aria-label="Testnet USDC">
+    <div class="bookhead"><h3>Testnet USDC</h3><span class="label" id="fundNet"></span></div>
+    <div class="fundgrid">
+      <div class="fundcol">
+        <h4>Deposit</h4>
+        <p>Your deposit address on <b id="fundNet2"></b>. It belongs to your account alone, so send test USDC to it from any wallet, exchange or faucet.</p>
+        <div class="addr"><code id="depAddr">—</code><button type="button" class="btn" id="copyAddr">Copy</button></div>
+        <p>Deposits are added to your balance after <span id="fundConf"></span> confirmations, about 20 seconds. Get test USDC from <a class="tx" href="https://faucet.circle.com" target="_blank" rel="noopener">faucet.circle.com</a> by pasting this address there. Send only USDC on Base Sepolia; transfers under 0.01 USDC are ignored.</p>
+      </div>
+      <div class="fundcol">
+        <h4>Withdraw</h4>
+        <p>Available: <b id="wdAvail">—</b>, your whole balance. Money in open contracts comes back to your balance when they settle or you sell them.</p>
+        <input id="wdTo" placeholder="Send to address, 0x…" autocomplete="off" spellcheck="false" aria-label="Address to send to">
+        <div class="stakerow"><input id="wdAmt" type="number" inputmode="decimal" min="1" step="0.01" placeholder="Amount in USDC" aria-label="Withdrawal amount in USDC"><button type="button" class="chip" id="wdMax">Max</button></div>
+        <button type="button" class="btn primary" id="wdGo">Withdraw</button>
+        <p id="wdNote"></p>
+      </div>
+    </div>
+    <div class="scroll"><table class="cards" id="fundTable"><thead><tr><th>Activity</th><th>Amount</th><th>Status</th><th>Transaction</th><th></th></tr></thead><tbody id="fundBody"></tbody></table></div>
+    <div class="empty" id="fundEmpty">No deposits or withdrawals yet.</div>
+  </section>
+
+  <footer class="foot">
+    <p>Prices are live BTC-USD, ETH-USD and XRP-USD mids from Coinbase's public feed; balances are test USDC on Base Sepolia, which has no value. The desk prices each contract with a lognormal model at a volatility the desk sets itself: by default a steady 24-hour at-the-money implied volatility interpolated between the Deribit option expiries either side, with Deribit's 30-day DVOL index or 5-hour realized volatility as alternatives. If Deribit can't be reached, implied pricing uses realized volatility scaled by the average implied-to-realized ratio seen so far. Real returns have fatter tails and changing volatility than the model assumes, so its probabilities can be wrong in either direction. Contracts settle at expiry even if this page is closed. If the price feed is down at expiry, the contract is voided and the stake refunded.</p>
+  </footer>
+</div>
+<div class="toast off" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+// This page keeps nothing in browser storage; the sign-in lives in an HttpOnly cookie.
+const $ = id => document.getElementById(id);
+let CFG = null, byId = {};
+let B = null;                    // account and contracts
+let MK = {};                     // per-coin market view: mid, live, vols, picks
+let marks = {};                  // per-position live bid
+const SER = {};                  // per-coin price points, memory only
+let offset = 0, conn = 'connecting', online = false, lastMsg = 0, busy = false;
+const ui = { asset:'BTC', dir:'H', k:2, exp:2, stake:5 };   // exp is an index into CFG.expiries: 2 = 1 min
+const now = () => Date.now() + offset;
+
+// ---------- maths (display only; every order is re-priced on fill) ----------
+function ncdf(x){
+  const t = 1/(1+0.2316419*Math.abs(x)), d = 0.3989422804014327*Math.exp(-x*x/2);
+  const p = d*t*(0.31938153+t*(-0.356563782+t*(1.781477937+t*(-1.821255978+t*1.330274429))));
+  return x > 0 ? 1-p : p;
+}
+function fairP(s, K, dir, ms, v){
+  const T = ms/60000;
+  if (T <= 0) return dir==='H' ? (s>K?1:0) : (s<K?1:0);
+  const c = ncdf((Math.log(s/K) - 0.5*v*v*T) / (v*Math.sqrt(T)));
+  return dir==='H' ? c : 1-c;
+}
+const askOf = f => Math.min(0.99, Math.max(0.03, f + CFG.edge));
+const roundTo = (v,dp) => Math.round(v*10**dp)/10**dp;
+const TAG = { front:'IV', dvol:'DVOL', rv:'RV', rvx:'RV×', iv:'DVOL' };
+
+// ---------- formatting ----------
+const fmtP = (p,dp) => p.toLocaleString('en-US',{minimumFractionDigits:dp,maximumFractionDigits:dp});
+const fmtC = v => v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtS = v => (v>=0?'+':'−') + fmtC(Math.abs(v));
+const fmtT = ms => { const s=Math.max(0,Math.ceil(ms/1000)), h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=String(s%60).padStart(2,'0'); return h ? `${h}:${String(m).padStart(2,'0')}:${x}` : `${m}:${x}`; };
+const fmtE = s => s<60 ? s+'s' : s<3600 ? (s/60)+'m' : (s/3600)+'h';
+const sgnCls = v => v>0.004 ? 'pos' : v<-0.004 ? 'neg' : '';
+
+// ---------- live connection ----------
+function addPoint(id, t, p){
+  const arr = SER[id], n = arr.length;
+  if (n >= 2 && t - arr[n-2].t < CFG.sample) arr[n-1] = {t,p}; else arr.push({t,p});
+  const cut = t - CFG.keep; let i = 0;
+  while (i < arr.length-1 && arr[i].t < cut) i++;
+  if (i) arr.splice(0, i);
+}
+function apply(m){
+  offset = m.now - Date.now(); lastMsg = Date.now(); online = true; conn = m.conn;
+  if (m.config && !CFG){ CFG = m.config; byId = Object.fromEntries(CFG.assets.map(a => [a.id, a])); build(); }
+  if (m.full) for (const a of CFG.assets) SER[a.id] = [];
+  for (const [id, pts] of Object.entries(m.points || {})) for (const [t,p] of pts) addPoint(id, t, p);
+  MK = m.assets; marks = m.marks || {};
+  let full = false;
+  if (m.book){ B = m.book; full = true; }
+  for (const e of m.events || []) toast(e);
+  render(full);
+}
+let es = null, checking = false;
+function connect(){
+  es = new EventSource('/api/stream');
+  es.onmessage = e => { try { apply(JSON.parse(e.data)); } catch(err){ console.error(err); } };
+  es.onerror = () => {   // EventSource retries by itself; first make sure the session is still good
+    online = false; render();
+    if (checking) return;
+    checking = true;
+    fetch('/api/me').then(r => { if (r.status === 401) showAuth('Your session ended. Log in again.'); })
+      .catch(() => {}).finally(() => { checking = false; });
+  };
+}
+const OFFLINE = "Can't reach Strikeline right now. Try again in a moment.";
+async function post(path, payload){
+  try {
+    const r = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload||{}) });
+    const j = await r.json();
+    if (r.status === 401 && !['/api/login', '/api/signup'].includes(path)) showAuth('Your session ended. Log in again.');
+    return j;
+  } catch(e){ return { ok:false, error:OFFLINE }; }
+}
+
+// ---------- testnet USDC ----------
+const short = a => a ? a.slice(0, 6) + '…' + a.slice(-4) : '';
+const WD_LABEL = { queued:'Queued', signed:'Sending', broadcast:'Sending', sent:'Sent', failed:'Failed', cancelled:'Cancelled', review:'Under review' };
+function renderFunds(){
+  const F = CFG.funding, f = B.funding;
+  if (!F || !f) return;
+  $('fundNet').textContent = `${F.network} · test tokens only`;
+  $('fundNet2').textContent = F.network;
+  $('fundConf').textContent = F.confirmations;
+  $('depAddr').textContent = f.depositAddress || '—';
+  $('copyAddr').disabled = !f.depositAddress;
+  $('wdAvail').textContent = `${fmtC(f.withdrawable)} USDC`;
+  $('wdNote').textContent = `${fmtC(F.min)} to ${fmtC(F.max)} USDC per withdrawal; ${fmtC(f.dailyLeft)} left of the ${fmtC(F.daily)} limit for 24 hours.`;
+  $('wdGo').disabled = f.withdrawable < F.min;
+  const txLink = h => h ? `<a class="tx" href="${F.explorer}/tx/${h}" target="_blank" rel="noopener">${short(h)}</a>` : '—';
+  const rows = [
+    ...f.deposits.map(d => ({ t:d.t, html:`<td><div class="stack start"><span>Deposit</span><span class="sub">${new Date(d.t).toLocaleString()}</span></div></td><td data-label="Amount" class="pos">+${fmtC(d.amount)}</td><td><span class="pill credited">Credited</span></td><td data-label="Transaction">${txLink(d.tx)}</td><td></td>` })),
+    ...f.withdrawals.map(w => ({ t:w.t, html:`<td><div class="stack start"><span>Withdrawal to ${short(w.to)}</span><span class="sub">${w.error ? w.error : new Date(w.t).toLocaleString()}</span></div></td><td data-label="Amount">−${fmtC(w.amount)}</td><td><span class="pill ${w.status}">${WD_LABEL[w.status] || w.status}</span></td><td data-label="Transaction">${txLink(w.tx)}</td><td>${w.status === 'queued' ? `<button type="button" class="close" data-cancel="${w.id}">Cancel</button>` : ''}</td>` })),
+  ].sort((a, b) => b.t - a.t);
+  $('fundBody').innerHTML = rows.map(r => `<tr>${r.html}</tr>`).join('');
+  $('fundEmpty').hidden = rows.length > 0;
+}
+$('copyAddr').addEventListener('click', async () => {
+  const a = B?.funding?.depositAddress; if (!a) return;
+  try { await navigator.clipboard.writeText(a); toast('Deposit address copied'); }
+  catch(e){ const r = document.createRange(); r.selectNodeContents($('depAddr')); getSelection().removeAllRanges(); getSelection().addRange(r); }
+});
+$('wdMax').addEventListener('click', () => { if (B?.funding) $('wdAmt').value = Math.floor(Math.min(B.funding.withdrawable, CFG.funding.max) * 100) / 100; });
+$('wdGo').addEventListener('click', async () => {
+  const address = $('wdTo').value.trim(), amount = parseFloat($('wdAmt').value);
+  if (!address) return toast('Enter the address to send to.');
+  if (!(amount > 0)) return toast('Enter an amount to withdraw.');
+  $('wdGo').disabled = true;
+  const r = await post('/api/withdraw', { address, amount });
+  if (r.ok){ B = r.book; $('wdAmt').value = ''; toast(`Withdrawal of ${fmtC(amount)} USDC to ${short(address)} queued`); render(true); }
+  else { toast(r.error || OFFLINE); renderFunds(); }
+});
+$('fundBody').addEventListener('click', async e => {
+  const b = e.target.closest('[data-cancel]'); if (!b) return;
+  b.disabled = true;
+  const r = await post('/api/withdraw/cancel', { id: +b.dataset.cancel });
+  if (r.ok){ B = r.book; toast('Withdrawal cancelled and returned to your balance'); render(true); } else toast(r.error || OFFLINE);
+});
+
+// ---------- sign-in ----------
+let authMode = 'login';
+function setAuthMode(m){
+  authMode = m;
+  $('authTabs').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === m));
+  $('authGo').textContent = m === 'login' ? 'Log in' : 'Create account';
+  $('authPass').autocomplete = m === 'login' ? 'current-password' : 'new-password';
+  $('authNote').hidden = m === 'login';
+  authError('');
+}
+function authError(msg){ $('authErr').textContent = msg; $('authErr').hidden = !msg; }
+function clearDesk(){
+  B = null; MK = {}; marks = {}; online = false;
+  for (const k in SER) SER[k] = [];
+  for (const r of rowCache.values()) r.remove();
+  rowCache.clear();
+  $('histBody').innerHTML = ''; histPage = 0; histTotal = -1; histRows = []; histSeq++; $('histPager').hidden = true; $('histSum').textContent = '';
+  $('fundBody').innerHTML = ''; $('depAddr').textContent = '—'; $('wdTo').value = '';
+}
+function showAuth(msg){
+  if (es){ es.close(); es = null; }
+  clearDesk();
+  $('app').hidden = true; $('auth').hidden = false;
+  $('authPass').value = '';
+  authError(msg || '');
+  ($('authUser').value ? $('authPass') : $('authUser')).focus();
+}
+function showApp(name){
+  $('who').textContent = name;
+  $('auth').hidden = true; $('app').hidden = false;
+  lastMsg = Date.now();
+  connect();
+}
+$('authTabs').addEventListener('click', e => { const b = e.target.closest('[data-mode]'); if (b) setAuthMode(b.dataset.mode); });
+$('authForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const username = $('authUser').value.trim(), password = $('authPass').value;
+  if (!username || !password) return authError('Enter a username and a password.');
+  $('authGo').disabled = true;
+  const r = await post(authMode === 'login' ? '/api/login' : '/api/signup', { username, password });
+  $('authGo').disabled = false;
+  if (r.ok) showApp(r.username); else authError(r.error || OFFLINE);
+});
+$('logout').addEventListener('click', async () => { await post('/api/logout'); showAuth(); });
+
+// ---------- ticket ----------
+function ticketQuote(){
+  const a = byId[ui.asset], mk = MK[ui.asset] || {}, s = mk.mid || 0, T = CFG.expiries[ui.exp]*1000;
+  const pick = mk.pick || null, sig = CFG.sigmas[ui.k];
+  const K = s && pick ? roundTo(s*Math.exp(sig*pick.v*Math.sqrt(T/60000)), a.dp) : 0;
+  const f = K ? fairP(s, K, ui.dir, T, pick.v) : 0, ask = askOf(f), stake = ui.stake, n = stake/ask;
+  return { a, s, K, T, sig, f, ask, stake, n, pick, edge: stake - n*f };
+}
+function ticketProblem(q){
+  if (!online) return "Can't reach Strikeline right now. Try again in a moment.";
+  if (!MK[q.a.id]?.live) return `No live ${q.a.pid} price right now. Buying is paused until the feed is back.`;
+  if (!q.pick) return 'Still loading volatility from Deribit and recent candles.';
+  if (!(q.stake > 0)) return 'Enter a stake above zero.';
+  if (q.stake > B.balance + 1e-9) return `Stake is more than your ${fmtC(B.balance)} cash.`;
+  if (q.f > 0.95) return 'This outcome is nearly certain, so the desk will not quote it.';
+  if (q.f < 0.004) return 'This strike is too far away to quote at this expiry.';
+  return '';
+}
+async function buy(){
+  const q = ticketQuote(); if (busy || ticketProblem(q)) return;
+  busy = true; render();
+  const r = await post('/api/buy', { asset:ui.asset, dir:ui.dir, k:ui.k, exp:ui.exp, stake:q.stake, maxAsk:q.ask });
+  busy = false;
+  if (r.ok){
+    B = r.book; const p = r.position;
+    toast(`Bought #${p.id}: ${p.asset} ${p.dir==='H'?'above':'below'} ${fmtP(p.K, byId[p.asset].dp)} in ${fmtE(CFG.expiries[ui.exp])}, pays ${fmtC(p.n)}`);
+  } else toast(r.error || 'The order failed.');
+  render(true);
+}
+async function closePos(id){
+  const m = marks[id]; if (busy || !m) return;
+  busy = true; render();
+  const r = await post('/api/sell', { id, minBid:m.bid });
+  busy = false;
+  if (r.ok){ B = r.book; toast(`Sold #${id} back for ${fmtC(r.value)} (${fmtS(r.pnl)})`); }
+  else toast(r.error || 'The sale failed.');
+  render(true);
+}
+
+// ---------- UI ----------
+let toastTimer;
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.remove('off'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.add('off'), 3600); }
+
+function build(){
+  $('tabs').innerHTML = CFG.assets.map(a => `<button class="tab" data-a="${a.id}" aria-pressed="false"><span class="sym">${a.id} <small>${a.name}</small></span><span class="px" data-px>—</span><span class="chg" data-chg></span></button>`).join('');
+  $('segK').innerHTML = CFG.sigmas.map((s,i) => `<button data-k="${i}" aria-pressed="false">${s===0?'ATM':(s>0?'+':'−')+Math.abs(s)+'σ'}</button>`).join('');
+  $('segE').innerHTML = CFG.expiries.map((e,i) => `<button data-e="${i}" aria-pressed="false">${fmtE(e)}</button>`).join('');
+  for (const a of CFG.assets) SER[a.id] = [];
+  $('tabs').addEventListener('click', e => { const b=e.target.closest('[data-a]'); if(b){ ui.asset=b.dataset.a; render(true); } });
+  $('segK').addEventListener('click', e => { const b=e.target.closest('[data-k]'); if(b){ ui.k=+b.dataset.k; render(); } });
+  $('segE').addEventListener('click', e => { const b=e.target.closest('[data-e]'); if(b){ ui.exp=+b.dataset.e; render(); } });
+  $('dirH').onclick = () => { ui.dir='H'; render(); };
+  $('dirL').onclick = () => { ui.dir='L'; render(); };
+  $('stake').value = ui.stake;
+  $('stake').addEventListener('input', e => { ui.stake = parseFloat(e.target.value); render(); });
+  document.querySelectorAll('[data-stake]').forEach(b => b.onclick = () => { ui.stake=+b.dataset.stake; $('stake').value=ui.stake; render(); });
+  $('buy').onclick = buy;
+  $('openBody').addEventListener('click', e => { const b=e.target.closest('[data-close]'); if(b) closePos(+b.dataset.close); });
+  new ResizeObserver(() => drawChart()).observe($('cv'));
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => drawChart());
+}
+
+const HIST_PAGE = 10;
+let histPage = 0, histTotal = -1, histRows = [], histSeq = 0;    // page 0 = newest; rows come from the server
+async function loadHistory(){
+  const seq = ++histSeq;
+  let j;
+  try {
+    const r = await fetch(`/api/history?offset=${histPage * HIST_PAGE}&limit=${HIST_PAGE}`);
+    if (r.status === 401) return showAuth('Your session ended. Log in again.');
+    j = await r.json();
+  } catch(e){ return; }
+  if (seq !== histSeq || !j.ok) return;           // a newer request is on its way
+  histTotal = j.total;
+  const pages = Math.max(1, Math.ceil(histTotal / HIST_PAGE));
+  if (histPage > pages - 1){ histPage = pages - 1; return loadHistory(); }
+  histRows = j.rows;
+  drawHistory();
+}
+function drawHistory(){
+  const from = histPage * HIST_PAGE, pages = Math.max(1, Math.ceil(histTotal / HIST_PAGE));
+  $('histBody').innerHTML = histRows.map(h => {
+    const a = byId[h.asset];
+    const lbl = { win:'Won', loss:'Lost', closed:'Sold', void:'Voided' }[h.res];
+    return `<tr><td><div class="stack start"><span class="pill ${h.dir==='H'?'h':'l'}">${h.dir==='H'?'▲':'▼'} ${h.asset}</span><span class="sub">#${h.id}${h.vs?' · '+(TAG[h.vs] || h.vs):''}</span></div></td><td data-label="Strike">${fmtP(h.K,a.dp)}</td><td data-label="Final">${h.px!=null?fmtP(h.px,a.dp):'—'}</td><td><span class="pill ${h.res}">${lbl}</span></td><td data-label="P&amp;L" class="${sgnCls(h.pnl)}">${fmtS(h.pnl)}</td></tr>`;
+  }).join('');
+  $('histEmpty').hidden = histTotal > 0;
+  $('histPager').hidden = histTotal <= HIST_PAGE;
+  $('histRange').textContent = `${from + 1}–${from + histRows.length} of ${histTotal}`;
+  $('histNewer').disabled = histPage === 0;
+  $('histOlder').disabled = histPage >= pages - 1;
+  $('histSum').textContent = histTotal > 0 ? `${histTotal} entries` : '';
+}
+$('histNewer').addEventListener('click', () => { if (histPage > 0){ histPage--; loadHistory(); } });
+$('histOlder').addEventListener('click', () => { histPage++; loadHistory(); });
+
+const rowCache = new Map();
+function render(full){
+  if (Date.now() - lastMsg > 3000) online = false;
+  const feed = $('feed');
+  if (!CFG || !B){
+    feed.className = online ? 'feed' : 'feed bad';
+    $('feedTxt').textContent = online ? 'Loading…' : 'Offline · reconnecting';
+    return;
+  }
+  const t = now();
+  const ids = CFG.assets.map(a => a.id);
+  const allLive = ids.every(id => MK[id]?.live), anyLive = ids.some(id => MK[id]?.live);
+  feed.className = 'feed ' + (!online ? 'bad' : allLive ? 'live' : (conn==='connecting' && !anyLive) ? '' : 'bad');
+  $('feedTxt').textContent = !online ? 'Offline · reconnecting' : allLive ? 'Live · Coinbase' : conn==='connecting' && !anyLive ? 'Connecting to Coinbase…' : conn==='reconnecting' ? 'Feed down · reconnecting' : 'Feed partly stale';
+
+  document.querySelectorAll('.tab').forEach(el => {
+    const a = byId[el.dataset.a], arr = SER[a.id], mk = MK[a.id] || {}, p = mk.mid;
+    el.setAttribute('aria-pressed', a.id===ui.asset);
+    el.querySelector('[data-px]').textContent = p ? fmtP(p, a.dp) : '—';
+    const c = el.querySelector('[data-chg]');
+    if (!p){ c.textContent=''; return; }
+    if (!mk.live || !online){ c.textContent = 'stale'; c.className = 'chg stale'; return; }
+    const ref = arr.find(x => x.t >= t - CFG.winPast);
+    if (!ref){ c.textContent=''; return; }
+    const ch = (p/ref.p - 1)*100;
+    c.textContent = (ch>=0?'+':'−')+Math.abs(ch).toFixed(2)+'% · 15m'; c.className = 'chg ' + (ch>=0?'pos':'neg');
+  });
+
+  // ticket
+  const q = ticketQuote(), prob = ticketProblem(q), ok = q.s > 0 && q.stake > 0 && !!q.pick;
+  $('tkSym').textContent = q.pick ? `${q.a.pid} · σ ${(q.pick.v*100).toFixed(3)}%/√min (${TAG[q.pick.used]})` : q.a.pid;
+  $('dirH').setAttribute('aria-pressed', ui.dir==='H'); $('dirL').setAttribute('aria-pressed', ui.dir==='L');
+  $('segK').querySelectorAll('button').forEach((b,i) => b.setAttribute('aria-pressed', i===ui.k));
+  $('segE').querySelectorAll('button').forEach((b,i) => b.setAttribute('aria-pressed', i===ui.exp));
+  $('kVal').textContent = q.K ? `${fmtP(q.K, q.a.dp)} (${q.K>=q.s?'+':'−'}${Math.abs((q.K/q.s-1)*1e4).toFixed(1)} bp)` : '—';
+  $('qProb').textContent = q.K ? (q.f*100).toFixed(1)+'%' : '—';
+  $('qAsk').textContent = q.K ? q.ask.toFixed(3) : '—';
+  $('qN').textContent = ok ? fmtC(q.n) : '—';
+  $('qPay').textContent = ok ? `${fmtC(q.n)} (${(1/q.ask).toFixed(2)}×)` : '—';
+  $('qEdge').textContent = ok ? fmtC(q.edge) : '—';
+  const btn = $('buy');
+  btn.className = 'buy ' + (ui.dir==='H'?'h':'l'); btn.disabled = !!prob || busy;
+  btn.textContent = busy ? 'Sending…' : `Buy ${ui.dir==='H'?'▲ Higher':'▼ Lower'} · ${fmtE(CFG.expiries[ui.exp])}`;
+  btn.title = prob;   // why buying is unavailable, if it is
+
+  // open book
+  const body = $('openBody'); let openVal = 0, openCost = 0; const seen = new Set();
+  for (const pos of [...B.positions].sort((x,y)=>x.exp-y.exp)){
+    seen.add(pos.id);
+    const a = byId[pos.asset], s = MK[pos.asset]?.mid, left = pos.exp - t, m = online ? marks[pos.id] : null;
+    if (m) openVal += m.value;
+    openCost += pos.stake;
+    let r = rowCache.get(pos.id);
+    if (!r){
+      r = document.createElement('tr');
+      r.innerHTML = `<td><div class="stack start"><span class="pill ${pos.dir==='H'?'h':'l'}">${pos.dir==='H'?'▲':'▼'} ${pos.asset}</span><span class="sub">#${pos.id} · ${TAG[pos.vs] || pos.vs}</span></div></td><td data-label="Strike">${fmtP(pos.K,a.dp)}</td><td data-s data-label="Mid"></td><td data-label="Left"><div class="timer"><span data-l></span><span class="bar"><i data-b></i></span></div></td><td data-label="Cost">${fmtC(pos.stake)}</td><td data-v data-label="Bid value"></td><td><button class="close" data-close="${pos.id}">Sell</button></td>`;
+      rowCache.set(pos.id, r);
+    }
+    body.appendChild(r);
+    const sc = r.querySelector('[data-s]');
+    sc.textContent = s ? fmtP(s,a.dp) : '—';
+    sc.className = !s ? '' : (pos.dir==='H' ? s>pos.K : s<pos.K) ? 'itm' : 'otm';
+    r.querySelector('[data-l]').textContent = left > 0 ? fmtT(left) : 'settling…';
+    r.querySelector('[data-b]').style.width = Math.max(0, Math.min(100, 100*left/(pos.exp-pos.open))) + '%';
+    r.querySelector('[data-v]').innerHTML = m && left > 0 ? `<div class="stack"><span>${fmtC(m.value)}</span><span class="sub ${sgnCls(m.value-pos.stake)}">${fmtS(m.value-pos.stake)}</span></div>` : '<span class="muted">no live bid</span>';
+    r.querySelector('[data-close]').disabled = !(m && left > 0) || busy;
+  }
+  for (const [pid,r] of rowCache) if (!seen.has(pid)){ r.remove(); rowCache.delete(pid); }
+  $('openEmpty').hidden = B.positions.length > 0;
+  $('openSum').textContent = B.positions.length ? `${B.positions.length} open · cost ${fmtC(openCost)}` : '';
+
+  if (full){
+    if (B.stats.total !== histTotal) loadHistory();    // something settled: refresh the page being viewed
+    renderFunds();
+  }
+
+  const { realized, settled, wins } = B.stats;     // over the whole history, from the server
+  $('sEq').textContent = fmtC(B.balance + openVal);
+  $('sBal').textContent = fmtC(B.balance);
+  const pe = $('sPnl'); pe.textContent = fmtS(realized); pe.className = sgnCls(realized);
+  $('sHit').textContent = settled ? `${Math.round(100*wins/settled)}% of ${settled}` : '—';
+  $('sEdge').textContent = fmtC(B.edgePaid);
+
+  drawChart();
+}
+
+// ---------- chart ----------
+function niceStep(range, n){ const raw = range/n, mag = 10**Math.floor(Math.log10(raw)), r = raw/mag; return (r<1.5?1:r<3?2:r<7?5:10)*mag; }
+function drawChart(){
+  const cv = $('cv'), w = cv.clientWidth, h = cv.clientHeight; if (!w || !h || !CFG || !B) return;
+  const a = byId[ui.asset], arr = SER[a.id], t = now();
+  const WIN_FUT = 5*60e3, t0 = t - CFG.winPast, t1 = t + WIN_FUT, vis = arr.filter(p => p.t >= t0);
+  $('loading').hidden = vis.length > 1;
+  const dpr = window.devicePixelRatio || 1;
+  if (cv.width !== Math.round(w*dpr) || cv.height !== Math.round(h*dpr)){ cv.width = Math.round(w*dpr); cv.height = Math.round(h*dpr); }
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+  if (vis.length < 2) return;
+  const cs = getComputedStyle(document.documentElement), col = n => cs.getPropertyValue(n).trim();
+  const C = { muted:col('--muted'), line:col('--line'), accent:col('--accent'), up:col('--up'), down:col('--down'), sunk:col('--sunk'), onA:col('--on-accent'), warn:col('--warn') };
+  const mono = '11px "IBM Plex Mono", ui-monospace, Consolas, monospace';
+  const padL = 10, padR = w < 480 ? 74 : 92, padT = 16, padB = 26, pw = w-padL-padR, ph = h-padT-padB;
+  const X = x => padL + (x - t0)/(t1 - t0)*pw;
+  const mine = B.positions.filter(p => p.asset === a.id), q = ticketQuote();
+  let lo = Infinity, hi = -Infinity;
+  for (const p of vis){ if (p.p<lo) lo=p.p; if (p.p>hi) hi=p.p; }
+  for (const p of mine){ lo=Math.min(lo,p.K); hi=Math.max(hi,p.K); }
+  if (q.K){ lo = Math.min(lo, q.K); hi = Math.max(hi, q.K); }
+  const ref = vis[vis.length-1].p, minSpan = ref*0.001;
+  if (hi-lo < minSpan){ const m=(hi+lo)/2; lo=m-minSpan/2; hi=m+minSpan/2; }
+  const pad = (hi-lo)*0.1; lo -= pad; hi += pad;
+  const Y = p => padT + (hi - p)/(hi - lo)*ph;
+
+  ctx.fillStyle = C.sunk; ctx.fillRect(X(t), padT, X(t1)-X(t), ph);
+  const st = niceStep(hi-lo, 5), gdp = Math.max(0, Math.min(6, -Math.floor(Math.log10(st))));
+  ctx.font = mono; ctx.textBaseline = 'middle'; ctx.lineWidth = 1;
+  for (let v = Math.ceil(lo/st)*st; v <= hi; v += st){
+    const y = Math.round(Y(v)) + .5;
+    ctx.strokeStyle = C.line; ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL+pw, y); ctx.stroke();
+    ctx.fillStyle = C.muted; ctx.textAlign = 'left'; ctx.fillText(fmtP(v, gdp), padL+pw+8, y);
+  }
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
+  for (const m of [-15,-10,-5,0,5]){ ctx.fillStyle = C.muted; ctx.fillText(m===0 ? 'now' : (m>0?'+':'−')+Math.abs(m)+'m', X(t + m*60e3), h - 8); }
+  const nx = Math.round(X(t))+.5;
+  ctx.setLineDash([3,3]); ctx.strokeStyle = C.muted; ctx.beginPath(); ctx.moveTo(nx, padT); ctx.lineTo(nx, padT+ph); ctx.stroke(); ctx.setLineDash([]);
+
+  const path = () => { ctx.beginPath(); vis.forEach((p,i) => i ? ctx.lineTo(X(p.t), Y(p.p)) : ctx.moveTo(X(p.t), Y(p.p))); };
+  path(); ctx.save(); ctx.lineTo(X(vis[vis.length-1].t), padT+ph); ctx.lineTo(X(vis[0].t), padT+ph); ctx.closePath();
+  ctx.globalAlpha = 0.10; ctx.fillStyle = C.accent; ctx.fill(); ctx.restore();
+  path(); ctx.strokeStyle = C.accent; ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.stroke();
+
+  if (q.K){
+    ctx.setLineDash([1.5,3]); ctx.strokeStyle = C.muted; ctx.lineWidth = 1.25;
+    const qy = Math.round(Y(q.K))+.5; ctx.beginPath(); ctx.moveTo(X(t), qy); ctx.lineTo(Math.min(X(t+q.T), padL+pw), qy); ctx.stroke(); ctx.setLineDash([]);
+  }
+  ctx.font = '600 11px "IBM Plex Sans", system-ui, sans-serif';
+  for (const p of mine){
+    const c = p.dir==='H' ? C.up : C.down, y = Math.round(Y(p.K))+.5;
+    const xs = Math.max(padL, X(p.open)), beyond = p.exp > t1, xe = beyond ? padL+pw : X(p.exp);
+    ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.setLineDash([5,4]);
+    ctx.beginPath(); ctx.moveTo(xs, y); ctx.lineTo(xe, y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = c;
+    if (beyond){ ctx.beginPath(); ctx.moveTo(xe, y-5); ctx.lineTo(xe+6, y); ctx.lineTo(xe, y+5); ctx.fill(); }
+    else { ctx.beginPath(); ctx.arc(xe, y, 4, 0, Math.PI*2); ctx.fill(); }
+    ctx.textAlign = 'left'; ctx.textBaseline = p.dir==='H' ? 'bottom' : 'top';
+    ctx.fillText(`#${p.id} ${p.dir==='H'?'▲':'▼'} ${fmtT(p.exp-t)}`, xs + 4, p.dir==='H' ? y-3 : y+3);
+  }
+  const last = vis[vis.length-1], x = X(last.t), y = Y(last.p), stale = !(MK[a.id]?.live && online);
+  ctx.fillStyle = stale ? C.warn : C.accent; ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI*2); ctx.fill();
+  ctx.font = '500 11.5px "IBM Plex Mono", ui-monospace, Consolas, monospace';
+  const txt = fmtP(last.p, a.dp), tw = Math.min(ctx.measureText(txt).width + 12, padR - 4);
+  const bx = padL + pw + 2, by = Math.max(padT, Math.min(padT+ph-18, y - 9));
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(bx, by, tw, 18, 4) : ctx.rect(bx, by, tw, 18); ctx.fill();
+  ctx.fillStyle = C.onA; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bx+6, by+9.5);
+}
+
+// ---------- boot ----------
+fetch('/api/me').then(r => r.json()).then(j => j.ok ? showApp(j.username) : showAuth()).catch(() => showAuth(OFFLINE));
+setInterval(() => render(), 250);   // countdowns and staleness between updates
+})();
+</script>
+</body>
+</html>
